@@ -1,0 +1,297 @@
+import os
+from typing import Any, Generator, List
+import uuid
+from fastapi import HTTPException
+from langchain_openai import OpenAIEmbeddings
+from langchain_postgres import PGVector, PostgresChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.documents.base import Document
+from langchain_core.runnables.base import Runnable
+from langchain.chains import create_retrieval_chain
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader
+import psycopg
+import boto3
+
+from CustomMessageHistory import CustomChatMessageHistory
+from CustomRunnableWithMessageHistory import CustomRunnableWithMessageHistory
+
+# Initalize S3 client
+s3 = boto3.client('s3')
+S3_BUCKET_NAME = os.environ.get("S3_FAISS_BUCKET_NAME")
+
+# Load API token
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+
+# Connect to database
+DATABASE_URL = os.environ['DATABASE_URL']
+if DATABASE_URL.startswith("postgres://"):
+    connection_string = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+TABLE_NAME = "chat_history"
+sync_connection = psycopg.connect(DATABASE_URL, sslmode='require')
+
+
+# Define a method to get sync connection
+# Used for saving streaming responses
+def get_db_connection():
+    """
+    Retrieve a synchronous connection to the PostgreSQL database.
+    
+    :return: A psycopg connection object.
+    """
+    return psycopg.connect(DATABASE_URL, sslmode='require')
+
+
+def get_chat_history(session_id: str, session_name: str = None) -> CustomChatMessageHistory:
+    """
+    Retrieve chat history for a given session.
+
+    :param session_id: The UUID or string identifier of the session.
+    :param session_name: An optional name for the session.
+    :return: A CustomChatMessageHistory object containing the chat history.
+    """
+    connection = get_db_connection()
+
+    history = CustomChatMessageHistory(
+        TABLE_NAME, 
+        str(session_id), 
+        session_name, 
+        sync_connection=connection)
+
+    return history
+
+
+def delete_chat_history(session_id: str, session_name: str = None) -> None:
+    """
+    Delete chat history for a given session.
+
+    :param session_id: The UUID or string identifier of the session.
+    :param session_name: An optional name for the session.
+    """
+    connection = get_db_connection()
+    try:
+        history = CustomChatMessageHistory(
+            TABLE_NAME, 
+            session_id, 
+            session_name, 
+            sync_connection=connection)
+        # Delete all messages associated with this session
+        history.clear()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred while deleting the session: {e}")
+    finally:
+        connection.close()
+
+
+def get_vector_store(embeddings_model: OpenAIEmbeddings,
+                     collection_name: str,
+                     connection: str) -> PGVector:
+    """
+    Initialize a PGVector vector store for storing embeddings.
+
+    :param embeddings_model: An instance of the OpenAIEmbeddings model.
+    :param collection_name: The name of the collection in the vector store.
+    :param connection: The connection string to the PostgreSQL database.
+    :return: A PGVector object.
+    """
+    vector_store = PGVector(
+        embeddings=embeddings_model,
+        collection_name=collection_name,
+        connection=connection,
+        use_jsonb=True
+    )
+
+    return vector_store
+
+
+def get_runnanble_chain(history_aware_retriever, question_answer_chain) -> CustomRunnableWithMessageHistory: 
+    """
+    Create and return a RAG chain wrapped with history tracking.
+
+    :param history_aware_retriever: The history-aware retriever instance.
+    :param question_answer_chain: The question-answering chain instance.
+    :return: A CustomRunnableWithMessageHistory object representing the RAG chain.
+    """
+    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+    conversational_rag_chain = CustomRunnableWithMessageHistory(
+        rag_chain,
+        get_session_history=get_chat_history,
+        input_messages_key="input",
+        history_messages_key="chat_history",
+        output_messages_key="answer"
+    )
+    return conversational_rag_chain
+
+
+# Streaming response generator
+def stream_rag_response(user_input: str, 
+                        session_name: str, 
+                        history_aware_retriever: Runnable[Any, List[Document]], 
+                        question_answer_chain: Runnable) -> Generator[str, None, None]:
+    """
+    Stream responses from the RAG model based on user input and chat history.
+
+    :param user_input: The user's input or query.
+    :param session_anme: The human_readable name to retrieve chat history for context.
+    :param history_aware_retriever: A runnable object for retrieving relevant documents.
+    :param question_answer_chain: A runnable object for generating responses.
+    :yield: Chunks of text as they are generated by the RAG model.
+    """
+    try:
+        # Stream the response from the model
+        conversational_rag_chain = get_runnanble_chain(history_aware_retriever, question_answer_chain)
+
+        response_stream = conversational_rag_chain.stream({"input": user_input},
+                                           config={"configurable": {
+                                               "session_id": uuid.uuid5(uuid.NAMESPACE_DNS, session_name),
+                                               "session_name": session_name}})
+        for chunk in response_stream:
+            chunk_text = chunk.get('answer', '')
+            # response_buffer += chunk_text
+            if chunk_text:
+                yield chunk_text
+        
+    except Exception as e:
+        yield f"\nError during streaming: {e}"
+
+
+def clean_chunk(text: str) -> str:
+    """
+    Clean a chunk of text by removing null bytes.
+
+    :param text: The text chunk to clean.
+    :return: The cleaned text chunk.
+    """
+    # Replace null bytes with a space (or any other character)
+    return text.replace("\0", " ")
+
+
+def get_existing_sources(connection, collection_name: str) -> List[str]:
+    """
+    Retrieve existing document sources from the vector store.
+
+    :param connection: The PGVector connection object.
+    :param collection_name: The name of the collection in the vector store.
+    :return: List of existing document sources.
+    """
+    cursor = connection.cursor()
+    cursor.execute(f"SELECT langchain_pg_embedding.cmetadata->>'source', lc.name FROM langchain_pg_embedding INNER JOIN langchain_pg_collection lc ON langchain_pg_embedding.collection_id = lc.uuid WHERE name = '{collection_name}'")
+    existing_sources = [row[0] for row in cursor.fetchall()]
+    return existing_sources
+
+
+def update_vector_store(chunks, collection_name, connection):
+    """
+    Create a PGVector vector store from text chunks and save it.
+
+    :param chunks: List of text chunks with metadata.
+    :param save_path: Path to save the FAISS vector store.
+    :param connection: The PGVector connection object.
+    """
+    # Initialize the OpenAI embeddings model
+    embeddings_model = OpenAIEmbeddings(api_key=OPENAI_API_KEY, model="text-embedding-3-small")
+
+    # Extract texts and metadata
+    texts = [chunk['text'] for chunk in chunks]
+    clean_texts = [clean_chunk(text) for text in texts]
+    metadata = [chunk['metadata'] for chunk in chunks]
+
+    # Retrieve existing sources
+    existing_sources = get_existing_sources(connection, collection_name)
+
+    # Filter out chunks that already exist in the vector store
+    new_texts = []
+    new_metadata = []
+    for text, meta in zip(clean_texts, metadata):
+        if meta['source'] not in existing_sources:
+            new_texts.append(text)
+            new_metadata.append(meta)
+
+    # If there are no new texts, skip saving
+    if not new_texts:
+        print("No new documents to add to the vector store.")
+        return
+
+    # Initialize the PGVector store and add new vectors
+    PGVector.from_texts(embedding=embeddings_model, 
+                                       texts=new_texts, 
+                                       metadatas=new_metadata,
+                                       collection_name=collection_name,
+                                       pre_delete_collection=False,
+                                       use_jsonb=True,
+                                       connection=connection_string)
+    # Explicitly commit the transaction to ensure changes are saved
+    connection.commit()
+
+    print(f"Added {len(new_texts)} new document chunks to the vector store.")
+
+
+def load_documents_from_pdfs(pdf_files):
+    """
+    Load and split PDF documents into individual pages.
+
+    :param pdf_files: List of paths to PDF files.
+    :return: List of documents with their pages.
+    """
+    documents = []
+
+    for pdf_file in pdf_files:
+        try:
+            # Load the PDF using PyPDFLoader
+            print(f"Loading {pdf_file}...")
+            loader = PyPDFLoader(pdf_file)
+            document = loader.load_and_split()
+
+            documents.append({
+                'document_name': pdf_file,
+                'pages': document
+            })
+
+            print(f"Loaded {len(document)} pages from {pdf_file}")
+        except Exception as e:
+            print(f"Error loading document from {pdf_file}: {e}")
+
+    return documents
+
+
+def split_documents(documents):
+    """
+    Split loaded documents into smaller chunks for vectorization.
+
+    :param documents: List of documents with their pages.
+    :return: List of text chunks with metadata.
+    """
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+    all_chunks = []
+
+    for doc in documents:
+        for page in doc['pages']:
+            chunks = splitter.split_text(page.page_content)
+            for chunk in chunks:
+                all_chunks.append({
+                    'text': chunk,
+                    'metadata': {
+                        'source': doc['document_name']
+                    }
+                })
+
+    return all_chunks
+
+
+def is_valid_uuid(uuid_to_test, version=5):
+    """
+    Check if the given UUID is valid.
+
+    
+    :param uuid_to_test (str): The UUID to be checked.
+    :param version (int, optional): The version of the UUID. Defaults to 4.
+
+    Returns:
+        str: "Valid Uuid" if the UUID is valid, "Invalid Uuid" otherwise.
+    """
+    try:
+        # check for validity of Uuid
+        uuid_obj = uuid.UUID(uuid_to_test, version=version)
+    except ValueError:
+        return False
+    return True
