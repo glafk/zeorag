@@ -38,15 +38,19 @@ This project provides a REST API that leverages Retrieval-Augmented Generation (
     export AWS_ACCESS_KEY_ID = your-aws-access-key
     export AWS_SECRET_ACCESS_KEY = your-aws-secret-access-key
     export DATABASE_URL=your-database-url
-    export S3_FAISS_BUCKET_NAME=your-s3-bucket-name
+    export S3_BUCKET_NAME=your-s3-bucket-name
     ```
 
 4. Run the FastAPI application:
     ```bash
-    uvicorn main:app --host 0.0.0.0 --port 8001
+    uvicorn zeorag:app --host 0.0.0.0 --port 8001
     ```
 
 ## API Reference
+
+#### The base API URL is https://zeorag-50cc7403adc8.herokuapp.com/
+
+To invoke a certain path make a request to e.g. https://zeorag-50cc7403adc8.herokuapp.com/sessions
 
 ### `POST /upload_document/`
 
@@ -65,7 +69,7 @@ Queries the RAG model with a user question and session ID.
 
 - **Request:**
   - `question`: The user's question (string).
-  - `session_id`: The session identifier (string).
+  - `session_name`: The name of the session (string).
 
 - **Response:**
   - `200 OK`: The response from the RAG model, streamed as plain text.
@@ -77,6 +81,8 @@ Retrieves the chat history for a given session ID.
 
 - **Path Parameters:**
   - `session_id`: The session identifier (string).
+    If the session_id does not represent a valid UUID, it will be converted to one
+    using the uuid5 method.
 
 - **Response:**
   - `200 OK`: A list of messages in the session history.
@@ -88,6 +94,8 @@ Deletes the chat history for a given session ID.
 
 - **Path Parameters:**
   - `session_id`: The session identifier (string).
+    If the session_id does not represent a valid UUID, it will be converted to one
+    using the uuid5 method.
 
 - **Response:**
   - `200 OK`: A message indicating that the chat history was successfully deleted.
@@ -109,17 +117,20 @@ Lists all PDF documents stored in the S3 bucket.
   - `200 OK`: A list of PDF document names.
   - `500 Internal Server Error`: If an error occurs during retrieval.
 
+### Simple UI
+
+You can find a simple UI for interacting with ZeoRAG at https://zeorag-client-77282feeaae6.herokuapp.com/
+
+On the right you can find the currently active sessions.
+Click on the 'Papers' button right below to see a list of the papers that are currently part of the RAG or upload a new paper.
+
 ## Architecture
 
 - **FastAPI:** The web framework used for building the API.
 - **OpenAI API:** Provides the language model for generating responses.
 - **PostgreSQL:** Stores chat history for each session.
 - **AWS S3:** Stores the uploaded PDF documents.
-- **FAISS Vector Store:** Provides efficient retrieval of document chunks for context-aware answering.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a pull request or open an issue.
+- ** PG Vector Store:** Stores the vector embeddings in a Postgres database instance.
 
 ## License
 
