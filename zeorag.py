@@ -28,7 +28,7 @@ logger.setLevel(logging.ERROR)
 
 # Initalize S3 client
 s3 = boto3.client('s3')
-S3_BUCKET_NAME = os.environ.get("S3_FAISS_BUCKET_NAME")
+S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME")
 
 
 # Define the table name
