@@ -5,6 +5,7 @@ __pycache__/
 
 .vscode/
 node_modules/
+zeorag_ui/node_modules
 
 # C extensions
 *.so

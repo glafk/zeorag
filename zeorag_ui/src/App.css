@@ -1,0 +1,277 @@
+.App {
+  text-align: center;
+}
+
+.App-logo {
+  height: 40vmin;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .App-logo {
+    animation: App-logo-spin infinite 20s linear;
+  }
+}
+
+.App-header {
+  background-color: #282c34;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(10px + 2vmin);
+  color: white;
+}
+
+.App-link {
+  color: #61dafb;
+}
+
+@keyframes App-logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.app-container {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 300px;
+  background-color: #2c2f33;
+  color: #ffffff;
+  padding: 20px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0; /* Prevent sidebar from shrinking */
+}
+
+.sidebar.hidden {
+  display: none;
+}
+
+.main-content {
+  flex-grow: 1; /* Ensures the main content takes up remaining space */
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.view-toggle {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-window {
+  flex-grow: 1; /* Takes up as much vertical space as possible */
+  width: 100%; /* Ensure full width */
+  display: flex;
+  flex-direction: column;
+  background-color: #f4f4f9;
+  border-radius: 8px;
+  overflow-y: auto;
+}
+
+.files-container {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+}
+
+.chat-header {
+  padding: 20px;
+  background-color: #68aa54;
+  color: #ffffff;
+  font-size: 1.5em;
+  text-align: center;
+}
+
+.chat-history {
+  flex-grow: 1;
+  padding: 20px;
+  overflow-y: auto;
+  background-color: #f6f6f6;
+}
+
+.chat-input {
+  display: flex;
+  padding: 20px;
+  background-color: #ffffff;
+}
+
+.chat-input input {
+  flex-grow: 1;
+  padding: 10px;
+  font-size: 1em;
+}
+
+.chat-input button {
+  padding: 10px 20px;
+  font-size: 1em;
+}
+
+/* Common styles for all messages */
+.chat-message {
+  display: flex;
+  align-items: center;
+  margin-bottom: 15px;
+  padding: 10px;
+  border-radius: 8px;
+  max-width: 70%;
+  box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.1);
+  position: relative;
+  word-wrap: break-word; /* Ensure long text wraps properly */
+}
+
+/* User message styles */
+.chat-message.user {
+  background-color: #bbdab2;
+  color: black;
+  justify-content: flex-start;
+  margin-left: auto;
+  flex-direction: row-reverse; /* Reverses the order of icon and text */
+}
+
+/* Assistant message styles */
+.chat-message.assistant {
+  background-color: #e1e1e1;
+  color: black;
+  justify-content: flex-start;
+  margin-right: auto;
+}
+
+/* Icon styles */
+.chat-message.user::before,
+.chat-message.assistant::before {
+  content: '';
+  display: inline-block;
+  margin: 0 10px;
+  width: 30px;
+  height: 30px;
+  background-size: cover;
+  border-radius: 50%;
+  flex-shrink: 0; /* Prevent the icon from shrinking */
+}
+
+/* User icon */
+.chat-message.user::before {
+  background-image: url('icons/user.png');
+}
+
+/* Assistant icon */
+.chat-message.assistant::before {
+  background-image: url('icons/bot.png');
+}
+
+/* Ensure text doesn't overlap the icon */
+.chat-message .text-content {
+  flex-grow: 1;
+  white-space: pre-wrap; /* Allow text to wrap if it's too long */
+}
+
+/* Adjust icon placement */
+.chat-message.user .icon,
+.chat-message.assistant .icon {
+  margin-left: 10px;
+  margin-right: 10px;
+}
+
+.file-upload form {
+  display: flex;
+  flex-direction: column;
+}
+
+.file-upload input {
+  margin-bottom: 10px;
+}
+
+.file-upload button {
+  padding: 10px 20px;
+}
+
+.loading {
+  font-style: italic;
+  color: #888888;
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.session-creation {
+  margin-bottom: 20px;
+}
+
+.new-session-input {
+  width: 100%;
+  padding: 10px;
+  font-size: 1em;
+  margin-bottom: 10px;
+}
+
+.btn-primary {
+  padding: 10px 20px;
+}
+
+.session-list ul {
+  list-style: none;
+  padding: 0;
+}
+
+.session-list li {
+  padding: 10px;
+  cursor: pointer;
+}
+
+.session-list li.active {
+  background-color: #68aa54;
+  color: white;
+}
+
+.btn-primary {
+  background-color: #68aa54;
+  border-color: #2c2f33;
+}
+
+.btn-primary:hover {
+  background-color: #bbdab2;
+  border-color: #2c2f33;
+}
+
+.bg-sessions {
+  background-color: #68aa54;
+}
+
+.session-list {
+  margin-top: 20px;
+}
+
+.session-list .list-group-item {
+  position: relative; /* Required for absolute positioning of the delete button */
+  font-size: larger;
+  font-weight: 600;
+}
+
+.session-list .delete-button {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  font-weight: bolder;
+}
+
+.session-list .list-group-item:hover .delete-button {
+  opacity: 1;
+}
